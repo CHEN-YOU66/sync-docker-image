@@ -1,0 +1,73 @@
+name: 批量同步Docker镜像到阿里云ACR
+on:
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  batch-sync:
+    runs-on: ubuntu-latest
+    steps:
+      # 步骤1：检出代码（获取 images.txt 镜像列表）
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      # 步骤2：登录阿里云ACR（认证权限）
+      - name: 登录阿里云ACR
+        run: |
+          docker login --username="${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
+                      "${{ secrets.ALIYUN_REGISTRY }}" \
+                      --password="${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
+        env:
+          # 提前在GitHub Secrets配置以下3个参数（避免明文）
+          # 1. ALIYUN_ACCESS_KEY_ID：阿里云AccessKey ID（需ACR写入权限）
+          # 2. ALIYUN_ACCESS_KEY_SECRET：对应AccessKey Secret
+          # 3. ALIYUN_REGISTRY：阿里云ACR公网Registry地址（如 crpi-te5263t1tjwbqtd9.cn-guangzhou.personal.cr.aliyuncs.com）
+
+      # 步骤3：批量同步（循环处理 images.txt 中的每个镜像）
+      - name: 批量同步镜像到ACR
+        run: |
+          # 配置阿里云ACR命名空间（需提前在ACR控制台创建）
+          ACR_NAMESPACE="1panel-apps"
+          # 从Secrets获取ACR Registry地址
+          ACR_REGISTRY="${{ secrets.ALIYUN_REGISTRY }}"
+
+          # 循环读取 images.txt 中的每个镜像（每行1个镜像，格式：镜像名:标签）
+          while IFS= read -r image; do
+            # 跳过空行或注释行（#开头）
+            [[ -z "$image" || "$image" == \#* ]] && continue
+
+            echo -e "\n===== 开始处理镜像：$image ====="
+            
+            # 1. 拉取源镜像（从Docker Hub/GHCR等公共仓库）
+            echo "→ 拉取源镜像：$image"
+            if ! docker pull "$image"; then
+              echo "❌ 拉取 $image 失败，跳过该镜像"
+              continue
+            fi
+
+            # 2. 解析镜像名和标签（如 joplin/server:latest → 名：joplin/server，标签：latest）
+            image_name=$(echo "$image" | cut -d':' -f1)
+            image_tag=$(echo "$image" | cut -d':' -f2)
+
+            # 3. 构建阿里云ACR镜像地址（格式：Registry/命名空间/镜像名:标签）
+            acr_image="${ACR_REGISTRY}/${ACR_NAMESPACE}/${image_name}:${image_tag}"
+            echo "→ 阿里云ACR目标地址：$acr_image"
+
+            # 4. 给镜像打ACR标签 + 推送到ACR
+            echo "→ 打标签并推送..."
+            if docker tag "$image" "$acr_image" && docker push "$acr_image"; then
+              echo "✅ $image 同步成功"
+            else
+              echo "❌ $image 推送失败"
+            fi
+
+            # 5. 清理本地镜像（释放磁盘空间，可选）
+            docker rmi "$image" "$acr_image" 2>/dev/null || true
+
+            echo "===== 完成处理镜像：$image ====="
+          done < "images.txt"  # 读取镜像列表文件（需与工作流同目录）
+
+      # 步骤4：登出ACR（无论成功/失败都执行，保障安全）
+      - name: 登出阿里云ACR
+        if: always()
+        run: |
+          docker logout "${{ secrets.ALIYUN_REGISTRY }}"
