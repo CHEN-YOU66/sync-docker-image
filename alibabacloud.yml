@@ -1,0 +1,62 @@
+# 阿里云容器镜像服务(ACR)批量同步配置
+# 用途：自动拉取指定镜像列表，同步至阿里云私有仓库
+# 注意：密码通过环境变量传入，禁止明文存储！
+
+# 基础配置
+config:
+  # 替换为你的阿里云镜像仓库「根注册表地址」
+  # 格式示例：crxxxxx.cn-beijing.personal.cr.aliyuncs.com（从ACR控制台获取）
+  aliyun_registry: "你的阿里云Registry根地址"  
+  aliyun_namespace: "1panel-apps"  # 命名空间（需提前在ACR创建）
+  image_list_path: "images.txt"     # 镜像列表文件路径
+  timeout: 300                      # 执行超时时间（分钟）
+
+# 执行步骤
+steps:
+  # 步骤1：登录阿里云ACR（使用你的账号）
+  - name: "登录阿里云容器仓库"
+    type: "shell"
+    command: |
+      # 用户名固定为你的账号nick6424277007，密码从环境变量获取
+      docker login --username=nick6424277007 ${config.aliyun_registry} --password=${ALIBABACLOUD_PASSWORD}
+    env:
+      - name: "ALIBABACLOUD_PASSWORD"
+        description: "阿里云容器仓库固定密码（从ACR访问凭证获取）"
+        sensitive: true  # 标记为敏感信息，避免日志泄露
+
+  # 步骤2：批量同步镜像（拉取→打标→推送）
+  - name: "同步镜像到阿里云仓库"
+    type: "shell"
+    command: |
+      while IFS= read -r image; do
+        [[ -z "$image" || "$image" == \#* ]] && continue
+        
+        echo "===== 处理镜像: $image ====="
+        
+        # 拉取源镜像
+        if ! docker pull "$image"; then
+          echo "❌ 拉取失败，跳过"
+          continue
+        fi
+        
+        # 解析镜像名和标签
+        repo=$(echo "$image" | cut -d':' -f1)
+        tag=$(echo "$image" | cut -d':' -f2)
+        
+        # 构建阿里云镜像地址
+        aliyun_image="${config.aliyun_registry}/${config.aliyun_namespace}/${repo}:${tag}"
+        
+        # 打标并推送
+        docker tag "$image" "$aliyun_image" && docker push "$aliyun_image" && echo "✅ 推送成功" || echo "❌ 推送失败"
+        
+        # 清理本地镜像
+        docker rmi "$image" "$aliyun_image" 2>/dev/null || true
+        
+        echo "===== 完成处理: $image ====="
+      done < "${config.image_list_path}"
+
+  # 步骤3：登出（无论成功与否）
+  - name: "登出阿里云仓库"
+    type: "shell"
+    command: docker logout ${config.aliyun_registry}
+    condition: "always"
