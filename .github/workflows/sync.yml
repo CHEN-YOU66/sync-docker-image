@@ -23,8 +23,8 @@ jobs:
           # 目标镜像配置（阿里云ACR）
           dest_registry: "crpi-te5263t1tjwbqtd9.cn-guangzhou.personal.cr.aliyuncs.com"  # 你的ACR Registry地址
           dest_repo: "1panel-apps/${{ github.event.inputs.image_name }}"  # 目标路径：命名空间/源镜像名:标签
-          dest_username: LTAI5tSPLLKM7ngHyj8GkY6o
-          dest_password: HrW70wa5e4ak9BHm6oD58pW7JtLeuu
+          dest_username: 
+          dest_password: 
 
           # 其他可选配置
           debug: "true"  # 开启调试模式（输出详细日志）
