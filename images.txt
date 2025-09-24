@@ -1,3 +1,1 @@
-alpine
-kasmweb/nginx:1.25.3
-emby/embyserver
+docker.io/linuxserver/joplin-server:latest
